@@ -1,10 +1,10 @@
 {
-	"id": "super-duper-audio-recorder",
-	"name": "Super Duper Audio Recorder",
-	"version": "1.0.2",
-	"minAppVersion": "0.15.0",
-	"description": "A plugin to record audio directly within Obsidian.",
-	"author": "Thiago MadPin",
-	"authorUrl": "https://github.com/madpin",
-	"isDesktopOnly": true
+  "id": "super-duper-audio-recorder",
+  "name": "Super Duper Audio Recorder",
+  "version": "1.0.3",
+  "minAppVersion": "0.15.0",
+  "description": "A plugin to record audio directly within Obsidian.",
+  "author": "Thiago MadPin",
+  "authorUrl": "https://github.com/madpin",
+  "isDesktopOnly": true
 }
