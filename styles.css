@@ -6,3 +6,15 @@ available in the app when your plugin is enabled.
 If your plugin does not need CSS, delete this file.
 
 */
+/* styles.css */
+.is-recording {
+    color: red;
+    font-weight: bold;
+}
+
+/* Add styles for the canvas */
+canvas {
+    display: block;
+    width: 100%;
+    height: 50px;
+}
