@@ -15,18 +15,31 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: "18.x"
+          node-version: "20.x"
+          
+      - name: Cache node_modules
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node_modules-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node_modules-
+
+      - name: Install dependencies
+        run: npm install
 
       - name: Build plugin
-        run: |
-          npm install
-          npm run build
+        run: npm run build
 
       - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${GITHUB_REF#refs/tags/}"
+          if [ -z "$tag" ]; then
+            echo "Tag is empty. Exiting."
+            exit 1
+          fi
 
           gh release create "$tag" \
             --title="$tag" \
