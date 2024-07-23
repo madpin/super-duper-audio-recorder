@@ -1,4 +1,4 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } from 'obsidian';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, TFile } from 'obsidian';
 import { AudioRecorderSettingTab, AudioRecorderSettings, DEFAULT_SETTINGS } from './settings-tab';
 import { join } from 'path';  // Import the join function to handle file paths
 
@@ -48,7 +48,6 @@ export default class AudioRecorderPlugin extends Plugin {
 	statusBarItemEl: HTMLElement | null = null;
 
 	async onload() {
-		console.log('Loading Audio Recorder Plus Plugin');
 		await this.loadSettings();
 
 		this.addSettingTab(new AudioRecorderSettingTab(this.app, this));
@@ -56,37 +55,19 @@ export default class AudioRecorderPlugin extends Plugin {
 		this.addCommand({
 			id: 'start-stop-recording',
 			name: 'Start/Stop Recording',
-			callback: () => this.handleRecording(),
-			hotkeys: [
-				{
-					modifiers: ['Ctrl'],
-					key: 'R'
-				}
-			]
+			callback: () => this.handleRecording()
 		});
 
 		this.addCommand({
 			id: 'pause-recording',
 			name: 'Pause Recording',
-			callback: () => this.handlePause(),
-			hotkeys: [
-				{
-					modifiers: ['Ctrl'],
-					key: 'P'
-				}
-			]
+			callback: () => this.handlePause()
 		});
 
 		this.addCommand({
 			id: 'resume-recording',
 			name: 'Resume Recording',
-			callback: () => this.handleResume(),
-			hotkeys: [
-				{
-					modifiers: ['Ctrl'],
-					key: 'E'
-				}
-			]
+			callback: () => this.handleResume()
 		});
 
 		this.addCommand({
@@ -104,9 +85,7 @@ export default class AudioRecorderPlugin extends Plugin {
 		this.updateStatusBar(false);
 	}
 
-
 	onunload() {
-		console.log('Unloading Audio Recorder Plus Plugin');
 		this.updateStatusBar(false);
 	}
 
@@ -146,18 +125,15 @@ export default class AudioRecorderPlugin extends Plugin {
 
 	async handleRecording() {
 		const mimeType = `audio/${this.settings.recordingFormat};codecs=opus`;
-		console.log(`Requested MIME type: ${mimeType}`);
 
 		if (!MediaRecorder.isTypeSupported(mimeType)) {
 			new Notice(`The format ${mimeType} is not supported in this browser.`);
-			console.error(`The format ${mimeType} is not supported in this browser.`);
 			return;
 		}
 
 		if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
 			this.mediaRecorder.stop();
 			new Notice('Recording stopped');
-			console.log('Recording stopped');
 			this.updateStatusBar(false);
 		} else {
 			try {
@@ -176,7 +152,6 @@ export default class AudioRecorderPlugin extends Plugin {
 
 				this.mediaRecorder.ondataavailable = (event) => {
 					this.audioChunks.push(event.data);
-					console.log('Data available:', event.data);
 				};
 
 				this.mediaRecorder.onstop = async () => {
@@ -189,31 +164,24 @@ export default class AudioRecorderPlugin extends Plugin {
 						const fileName = `${this.settings.filePrefix || 'recording'}-${timestamp}.${this.settings.recordingFormat}`;
 						const sanitizedFileName = fileName.replace(/[\\/:*?"<>|]/g, '-');
 
-						// Use the correct method to join the folder and file name
 						const filePath = this.settings.saveFolder
 							? join(this.settings.saveFolder, sanitizedFileName)
 							: sanitizedFileName;
-
-						console.log(`Saving file to: ${filePath}`);
 
 						const file = await this.app.vault.createBinary(filePath, Buffer.from(base64Audio, 'base64'));
 						const editor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
 						if (editor) {
 							editor.replaceSelection(`![[${file.path}]]`);
-							console.log(`Inserted link to file: ${file.path}`);
 						}
 					} catch (error) {
-						console.error('Error saving file:', error);
 						new Notice(`Error saving file: ${error.message}`);
 					}
 				};
 
 				this.mediaRecorder.start();
 				new Notice('Recording started');
-				console.log('Recording started');
 				this.updateStatusBar(true);
 			} catch (error) {
-				console.error('Error accessing media devices:', error);
 				new Notice(`Error accessing media devices: ${error.message}`);
 			}
 		}
@@ -223,10 +191,8 @@ export default class AudioRecorderPlugin extends Plugin {
 		if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
 			this.mediaRecorder.pause();
 			new Notice('Recording paused');
-			console.log('Recording paused');
 		} else {
 			new Notice('No active recording to pause');
-			console.log('No active recording to pause');
 		}
 	}
 
@@ -234,10 +200,8 @@ export default class AudioRecorderPlugin extends Plugin {
 		if (this.mediaRecorder && this.mediaRecorder.state === 'paused') {
 			this.mediaRecorder.resume();
 			new Notice('Recording resumed');
-			console.log('Recording resumed');
 		} else {
 			new Notice('No paused recording to resume');
-			console.log('No paused recording to resume');
 		}
 	}
 }

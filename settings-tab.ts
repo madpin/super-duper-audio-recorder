@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting, TFolder, Vault } from 'obsidian';
-import { Plugin } from 'obsidian';
+import AudioRecorderPlugin from './main';
 
 export interface AudioRecorderSettings {
     recordingFormat: string;
@@ -9,7 +9,7 @@ export interface AudioRecorderSettings {
     pauseHotkey: string;
     resumeHotkey: string;
     audioDeviceId: string;
-    sampleRate: number; // Add sampleRate to the settings interface
+    sampleRate: number;
     bitrate: number;
 }
 
@@ -17,18 +17,18 @@ export const DEFAULT_SETTINGS: AudioRecorderSettings = {
     recordingFormat: 'ogg',
     saveFolder: '',
     filePrefix: 'recording',
-    startStopHotkey: 'Ctrl+R',
-    pauseHotkey: 'Ctrl+P',
-    resumeHotkey: 'Ctrl+E',
+    startStopHotkey: '',
+    pauseHotkey: '',
+    resumeHotkey: '',
     audioDeviceId: '',
-    sampleRate: 44100, // Default sample rate
+    sampleRate: 44100,
     bitrate: 128000
 }
 
 export class AudioRecorderSettingTab extends PluginSettingTab {
-    plugin: Plugin;
+    plugin: AudioRecorderPlugin;
 
-    constructor(app: App, plugin: Plugin) {
+    constructor(app: App, plugin: AudioRecorderPlugin) {
         super(app, plugin);
         this.plugin = plugin;
     }
@@ -73,10 +73,10 @@ export class AudioRecorderSettingTab extends PluginSettingTab {
                 supportedFormats.forEach(format => {
                     dropdown.addOption(format, format);
                 });
-                dropdown.setValue((this.plugin as any).settings.recordingFormat);
+                dropdown.setValue(this.plugin.settings.recordingFormat);
                 dropdown.onChange(async (value) => {
-                    (this.plugin as any).settings.recordingFormat = value;
-                    await (this.plugin as any).saveSettings();
+                    this.plugin.settings.recordingFormat = value;
+                    await this.plugin.saveSettings();
                 });
             });
 
@@ -88,10 +88,10 @@ export class AudioRecorderSettingTab extends PluginSettingTab {
                 sampleRates.forEach(rate => {
                     dropdown.addOption(rate.toString(), rate.toString());
                 });
-                dropdown.setValue((this.plugin as any).settings.sampleRate.toString());
+                dropdown.setValue(this.plugin.settings.sampleRate.toString());
                 dropdown.onChange(async (value) => {
-                    (this.plugin as any).settings.sampleRate = parseInt(value);
-                    await (this.plugin as any).saveSettings();
+                    this.plugin.settings.sampleRate = parseInt(value);
+                    await this.plugin.saveSettings();
                 });
             });
 
@@ -109,32 +109,38 @@ export class AudioRecorderSettingTab extends PluginSettingTab {
                     datalist.appendChild(option);
                 });
                 text.inputEl.appendChild(datalist);
-                text.setValue((this.plugin as any).settings.saveFolder);
+                text.setValue(this.plugin.settings.saveFolder);
                 text.onChange(async (value) => {
-                    (this.plugin as any).settings.saveFolder = value;
-                    await (this.plugin as any).saveSettings();
+                    this.plugin.settings.saveFolder = value;
+                    await this.plugin.saveSettings();
                 });
             });
 
         containerEl.createEl('h3', { text: 'File Naming' });
 
-        const fileNamingDesc = containerEl.createEl('p');
-        fileNamingDesc.innerHTML = `
-            <small>
-                Use the <b>File Prefix</b> setting to customize the naming of your audio files. The final file name will include this prefix followed by a timestamp.<br>
-                For example, if your prefix is <code>meeting</code>, the file name will look like <code>meeting-2023-07-21T15-30-00.ogg</code>.
-            </small>
-        `;
+        const fileNamingDesc = containerEl.createEl('p', { text: '' });
+        fileNamingDesc.appendChild(
+            document.createElement('small')
+        ).append(
+            `Use the `,
+            document.createElement('b').appendChild(document.createTextNode('File Prefix')),
+            ` setting to customize the naming of your audio files. The final file name will include this prefix followed by a timestamp.`,
+            document.createElement('br'),
+            `For example, if your prefix is `,
+            document.createElement('code').appendChild(document.createTextNode('meeting')),
+            `, the file name will look like `,
+            document.createElement('code').appendChild(document.createTextNode('meeting-2023-07-21T15-30-00.ogg'))
+        );
 
         new Setting(containerEl)
             .setName('File Prefix')
             .setDesc('Set a prefix for the audio file names.')
             .addText(text => text
                 .setPlaceholder('Enter file prefix')
-                .setValue((this.plugin as any).settings.filePrefix)
+                .setValue(this.plugin.settings.filePrefix)
                 .onChange(async (value) => {
-                    (this.plugin as any).settings.filePrefix = value;
-                    await (this.plugin as any).saveSettings();
+                    this.plugin.settings.filePrefix = value;
+                    await this.plugin.saveSettings();
                 }));
 
         containerEl.createEl('h3', { text: 'Audio Input Device' });
@@ -148,30 +154,49 @@ export class AudioRecorderSettingTab extends PluginSettingTab {
                 audioDevices.forEach(device => {
                     dropdown.addOption(device.deviceId, device.label);
                 });
-                dropdown.setValue((this.plugin as any).settings.audioDeviceId);
+                dropdown.setValue(this.plugin.settings.audioDeviceId);
                 dropdown.onChange(async (value) => {
-                    (this.plugin as any).settings.audioDeviceId = value;
-                    await (this.plugin as any).saveSettings();
+                    this.plugin.settings.audioDeviceId = value;
+                    await this.plugin.saveSettings();
                 });
             });
 
         containerEl.createEl('h3', { text: 'Documentation' });
 
-        const docDesc = containerEl.createEl('p');
-        docDesc.innerHTML = `
-            <small>
-                <b>File Prefix:</b> Customize the prefix for your audio files. The final file name will include this prefix followed by a timestamp.<br>
-                <b>Recording Format:</b> Select the format for your audio recordings. Available formats are OGG, WEBM, MP3, and M4A.<br>
-                <b>Save Folder:</b> Specify the folder where recordings will be saved. Auto-complete suggestions are available.<br>
-                <b>Audio Input Device:</b> Choose which microphone to use for recording.<br>
-                <b>Sample Rate:</b> Select the sample rate for your audio recordings.<br>
-                <b>Start/Stop Hotkey:</b> Set a hotkey to quickly start and stop recordings.<br>
-                <b>Pause Hotkey:</b> Set a hotkey to pause recordings.<br>
-                <b>Resume Hotkey:</b> Set a hotkey to resume recordings.<br>
-                <b>Bitrate:</b> Adjust the bitrate for your recordings to control quality and file size.<br>
-                <b>Visual Indicators:</b> The status bar will show when recording is active.
-            </small>
-        `;
+        const docDesc = containerEl.createEl('p', { text: '' });
+        docDesc.appendChild(
+            document.createElement('small')
+        ).append(
+            document.createElement('b').appendChild(document.createTextNode('File Prefix:')),
+            ` Customize the prefix for your audio files. The final file name will include this prefix followed by a timestamp.`,
+            document.createElement('br'),
+            document.createElement('b').appendChild(document.createTextNode('Recording Format:')),
+            ` Select the format for your audio recordings. Available formats are OGG, WEBM, MP3, and M4A.`,
+            document.createElement('br'),
+            document.createElement('b').appendChild(document.createTextNode('Save Folder:')),
+            ` Specify the folder where recordings will be saved. Auto-complete suggestions are available.`,
+            document.createElement('br'),
+            document.createElement('b').appendChild(document.createTextNode('Audio Input Device:')),
+            ` Choose which microphone to use for recording.`,
+            document.createElement('br'),
+            document.createElement('b').appendChild(document.createTextNode('Sample Rate:')),
+            ` Select the sample rate for your audio recordings.`,
+            document.createElement('br'),
+            document.createElement('b').appendChild(document.createTextNode('Start/Stop Hotkey:')),
+            ` Set a hotkey to quickly start and stop recordings.`,
+            document.createElement('br'),
+            document.createElement('b').appendChild(document.createTextNode('Pause Hotkey:')),
+            ` Set a hotkey to pause recordings.`,
+            document.createElement('br'),
+            document.createElement('b').appendChild(document.createTextNode('Resume Hotkey:')),
+            ` Set a hotkey to resume recordings.`,
+            document.createElement('br'),
+            document.createElement('b').appendChild(document.createTextNode('Bitrate:')),
+            ` Adjust the bitrate for your recordings to control quality and file size.`,
+            document.createElement('br'),
+            document.createElement('b').appendChild(document.createTextNode('Visual Indicators:')),
+            ` The status bar will show when recording is active.`
+        );
 
         containerEl.createEl('hr');
     }
