@@ -1,6 +1,6 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, TFile } from 'obsidian';
+import { App, Editor, MarkdownView, Modal, normalizePath, Notice, Plugin, Setting, TFile } from 'obsidian';
 import { AudioRecorderSettingTab, AudioRecorderSettings, DEFAULT_SETTINGS } from './settings-tab';
-import { join } from 'path';  // Import the join function to handle file paths
+
 
 // Modal for selecting audio input device
 class SelectInputDeviceModal extends Modal {
@@ -16,8 +16,7 @@ class SelectInputDeviceModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 
-		contentEl.createEl('h2', { text: 'Select Audio Input Device' });
-
+		new Setting(contentEl).setName('Select audio input device').setHeading();
 		const dropdown = contentEl.createEl('select');
 		this.devices.forEach(device => {
 			const option = dropdown.createEl('option');
@@ -164,9 +163,7 @@ export default class AudioRecorderPlugin extends Plugin {
 						const fileName = `${this.settings.filePrefix || 'recording'}-${timestamp}.${this.settings.recordingFormat}`;
 						const sanitizedFileName = fileName.replace(/[\\/:*?"<>|]/g, '-');
 
-						const filePath = this.settings.saveFolder
-							? join(this.settings.saveFolder, sanitizedFileName)
-							: sanitizedFileName;
+						const filePath = normalizePath(this.settings.saveFolder + '/' + sanitizedFileName);
 
 						const file = await this.app.vault.createBinary(filePath, Buffer.from(base64Audio, 'base64'));
 						const editor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
