@@ -45,6 +45,7 @@ export default class AudioRecorderPlugin extends Plugin {
 	mediaRecorder: MediaRecorder | null = null;
 	audioChunks: Blob[] = [];
 	statusBarItemEl: HTMLElement | null = null;
+	recordingStatus: RecordingStatus = RecordingStatus.Idle;
 
 	async onload() {
 		await this.loadSettings();
@@ -81,11 +82,11 @@ export default class AudioRecorderPlugin extends Plugin {
 		});
 
 		this.statusBarItemEl = this.addStatusBarItem();
-		this.updateStatusBar(false);
+		this.updateStatusBar();
 	}
 
 	onunload() {
-		this.updateStatusBar(false);
+		this.updateStatusBar();
 	}
 
 	async loadSettings() {
@@ -110,14 +111,22 @@ export default class AudioRecorderPlugin extends Plugin {
 		new SelectInputDeviceModal(this.app, this, devices).open();
 	}
 
-	updateStatusBar(isRecording: boolean) {
+	updateStatusBar() {
 		if (this.statusBarItemEl) {
-			if (isRecording) {
-				this.statusBarItemEl.setText('Recording 🎙️...');
-				this.statusBarItemEl.addClass('is-recording');
-			} else {
-				this.statusBarItemEl.setText('');
-				this.statusBarItemEl.removeClass('is-recording');
+			switch (this.recordingStatus) {
+				case RecordingStatus.Recording:
+					this.statusBarItemEl.setText('Recording 🎙️...');
+					this.statusBarItemEl.addClass('is-recording');
+					break;
+				case RecordingStatus.Paused:
+					this.statusBarItemEl.setText('Recording paused 🎙️');
+					this.statusBarItemEl.addClass('is-recording');
+					break;
+				case RecordingStatus.Idle:
+				default:
+					this.statusBarItemEl.setText('');
+					this.statusBarItemEl.removeClass('is-recording');
+					break;
 			}
 		}
 	}
@@ -133,7 +142,8 @@ export default class AudioRecorderPlugin extends Plugin {
 		if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
 			this.mediaRecorder.stop();
 			new Notice('Recording stopped');
-			this.updateStatusBar(false);
+			this.recordingStatus = RecordingStatus.Idle;
+			this.updateStatusBar();
 		} else {
 			try {
 				const audioDevices = await this.getAudioInputDevices();
@@ -177,7 +187,8 @@ export default class AudioRecorderPlugin extends Plugin {
 
 				this.mediaRecorder.start();
 				new Notice('Recording started');
-				this.updateStatusBar(true);
+				this.recordingStatus = RecordingStatus.Recording;
+				this.updateStatusBar();
 			} catch (error) {
 				new Notice(`Error accessing media devices: ${error.message}`);
 			}
@@ -188,6 +199,8 @@ export default class AudioRecorderPlugin extends Plugin {
 		if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
 			this.mediaRecorder.pause();
 			new Notice('Recording paused');
+			this.recordingStatus = RecordingStatus.Paused;
+			this.updateStatusBar();
 		} else {
 			new Notice('No active recording to pause');
 		}
@@ -197,8 +210,16 @@ export default class AudioRecorderPlugin extends Plugin {
 		if (this.mediaRecorder && this.mediaRecorder.state === 'paused') {
 			this.mediaRecorder.resume();
 			new Notice('Recording resumed');
+			this.recordingStatus = RecordingStatus.Recording;
+			this.updateStatusBar();
 		} else {
 			new Notice('No paused recording to resume');
 		}
 	}
+}
+
+enum RecordingStatus {
+	Idle,
+	Recording,
+	Paused
 }
