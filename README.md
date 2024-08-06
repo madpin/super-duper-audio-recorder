@@ -17,13 +17,14 @@ Welcome to the coolest Obsidian plugin this side of the digital universe! 🚀
 
 ## Introduction
 
-Ever felt like the core audio recorder in Obsidian was playing hard to get? Well, fret no more! Our Super Duper Audio Recorder is here to save the day (and your sanity)! This plugin enhances your audio recording experience in Obsidian by adding folder selection and audio source options.
+Ever felt like the core audio recorder in Obsidian was playing hard to get? Well, fret no more! Our Super Duper Audio Recorder is here to save the day (and your sanity)! This plugin enhances your audio recording experience in Obsidian by adding folder selection, audio source options, pause functionality, and multi-track recording.
 
 ## 🌟 Features
 
 - 📂 **Folder Selection**: Choose where your audio gems get stored. No more "Where Did I Put That Recording?" game!
 - 🎚️ **Audio Source Picker**: Select your preferred microphone or input device.
-- 🎭 **Versatile Recording**: From podcasts to secret agent missions, we've got you covered!
+- ⏯️ **Pause and Resume**: Take a breather without stopping your recording session.
+- 🎭 **Multi-Track Recording**: Create separate tracks for different speakers or instruments.
 - ⏱️ **Custom Duration**: Set your recording time or go wild with unlimited recording.
 - 🎨 **Sleek UI**: Because even your recording interface deserves to look good.
 
@@ -41,7 +42,9 @@ Ever felt like the core audio recorder in Obsidian was playing hard to get? Well
 1. Click the microphone icon in the left ribbon or use the command palette
 2. Select your desired folder and audio source
 3. Hit that record button and speak your brilliant thoughts
-4. Stop when you're done and find your recording in the selected folder
+4. Use the pause button to temporarily halt recording when needed
+5. For multi-track recording, select "Add Track" to create a new track
+6. Stop when you're done and find your recording(s) in the selected folder
 
 ## Configuration
 
@@ -50,11 +53,15 @@ Visit the plugin settings to:
 - Choose preferred audio format
 - Adjust recording quality
 - Customize hotkeys
+- Configure multi-track settings
 
 ## FAQ
 
-Q: Can I use this for my secret agent missions?
-A: Absolutely! But we can neither confirm nor deny any covert operations.
+Q: Can I pause my recording mid-session?
+A: Absolutely! Just hit the pause button, grab a coffee, and resume when you're ready.
+
+Q: How many tracks can I record simultaneously?
+A: You can create multiple tracks, perfect for podcasts or band practice sessions!
 
 Q: Will this make me sound like Morgan Freeman?
 A: While we can't promise voice transformation, your ideas will sound equally epic!
@@ -78,8 +85,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Support
 
 If you love this plugin as much as we do, consider buying us a coffee! ☕
-[Buy Me A Coffee](#)
+[Buy Me A Coffee](https://buymeacoffee.com/madpin)
 
-Remember, with great power comes great responsibility. Use this plugin wisely, and may your recordings be ever crisp and your folders always organized!
+Remember, with great power comes great responsibility. Use this plugin wisely, and may your recordings be ever crisp, your pauses strategic, and your tracks perfectly balanced!
 
 Happy Recording! 🎉
