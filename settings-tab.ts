@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, TFolder, Vault } from 'obsidian';
+import { App, PluginSettingTab, Setting, TFolder, Vault, DropdownComponent } from 'obsidian';
 import AudioRecorderPlugin from './main';
 
 export interface AudioRecorderSettings {
@@ -11,10 +11,17 @@ export interface AudioRecorderSettings {
     audioDeviceId: string;
     sampleRate: number;
     bitrate: number;
+
+    enableMultiTrack: boolean;
+    maxTracks: number;
+    outputMode: 'single' | 'multiple';
+    useSourceNamesForTracks: boolean;
+    trackAudioSources: { [key: number]: string };
+    debug: boolean;
 }
 
 export const DEFAULT_SETTINGS: AudioRecorderSettings = {
-    recordingFormat: 'ogg',
+    recordingFormat: 'webm',
     saveFolder: '',
     filePrefix: 'recording',
     startStopHotkey: '',
@@ -22,7 +29,14 @@ export const DEFAULT_SETTINGS: AudioRecorderSettings = {
     resumeHotkey: '',
     audioDeviceId: '',
     sampleRate: 44100,
-    bitrate: 128000
+    bitrate: 128000,
+
+    enableMultiTrack: false,
+    maxTracks: 2,
+    outputMode: 'single',
+    useSourceNamesForTracks: true,
+    trackAudioSources: {},
+    debug: false
 }
 
 export class AudioRecorderSettingTab extends PluginSettingTab {
@@ -135,42 +149,111 @@ export class AudioRecorderSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('Audio input')
-            .setHeading();
+            .setName('Debug mode')
+            .setDesc('Enable debug logging')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.debug)
+                .onChange(async (value) => {
+                    this.plugin.settings.debug = value;
+                    await this.plugin.saveSettings();
+                }));
 
-        const audioDevices = await this.getAudioInputDevices();
 
         new Setting(containerEl)
-            .setName('Audio input device')
-            .setDesc('Select the audio input device for recording.')
-            .addDropdown(dropdown => {
-                audioDevices.forEach(device => {
-                    dropdown.addOption(device.deviceId, device.label);
-                });
-                dropdown.setValue(this.plugin.settings.audioDeviceId);
-                dropdown.onChange(async (value) => {
-                    this.plugin.settings.audioDeviceId = value;
+            .setName('Multi-track recording')
+            .setDesc('Configure settings for multi-track recording.')
+            .setHeading();
+
+        new Setting(containerEl)
+            .setName('Enable multi-track recording')
+            .setDesc('Toggle to activate or deactivate multi-track recording.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.enableMultiTrack)
+                .onChange(async (value) => {
+                    this.plugin.settings.enableMultiTrack = value;
                     await this.plugin.saveSettings();
-                });
-            });
+                    this.display(); // Refresh the settings page
+                }));
+
+        if (this.plugin.settings.enableMultiTrack) {
+            new Setting(containerEl)
+                .setName('Maximum tracks')
+                .setDesc('Set the number of simultaneous tracks (1-8).')
+                .addSlider(slider => slider
+                    .setLimits(1, 8, 1)
+                    .setValue(this.plugin.settings.maxTracks)
+                    .setDynamicTooltip()
+                    .onChange(async (value) => {
+                        this.plugin.settings.maxTracks = value;
+                        await this.plugin.saveSettings();
+                        this.display(); // Refresh the settings page
+                    }));
+
+            new Setting(containerEl)
+                .setName('Output mode')
+                .setDesc('Choose between single combined file or separate files for each track.')
+                .addDropdown(dropdown => dropdown
+                    .addOption('single', 'Single File')
+                    .addOption('multiple', 'Multiple Files')
+                    .setValue(this.plugin.settings.outputMode)
+                    .onChange(async (value: 'single' | 'multiple') => {
+                        this.plugin.settings.outputMode = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            // new Setting(containerEl)
+            //     .setName('Use source names for tracks')
+            //     .setDesc('Use audio source names for individual track filenames.')
+            //     .addToggle(toggle => toggle
+            //         .setValue(this.plugin.settings.useSourceNamesForTracks)
+            //         .onChange(async (value) => {
+            //             this.plugin.settings.useSourceNamesForTracks = value;
+            //             await this.plugin.saveSettings();
+            //         }));
+
+            for (let i = 1; i <= this.plugin.settings.maxTracks; i++) {
+                new Setting(containerEl)
+                    .setName(`Audio Source for Track ${i}`)
+                    .setDesc(`Select the audio input device for track ${i}`)
+                    .addDropdown(async (dropdown) => {
+                        await this.populateAudioDevices(dropdown);
+                        dropdown.setValue(this.plugin.settings.trackAudioSources[i] || "");
+                        dropdown.onChange(async (value) => {
+                            this.plugin.settings.trackAudioSources[i] = value;
+                            await this.plugin.saveSettings();
+                        });
+                    });
+            }
+        }
 
         new Setting(containerEl)
             .setName('Documentation')
             .setDesc(
-                'File prefix: Customize the prefix for your audio files. ' +
-                'The final file name will include this prefix followed by a timestamp.\n' +
-                'Recording format: Select the format for your audio recordings. ' +
-                'Available formats are OGG, WEBM, MP3, and M4A.\n' +
-                'Save folder: Specify the folder where recordings will be saved. ' +
-                'Auto-complete suggestions are available.\n' +
-                'Audio input device: Choose which microphone to use for recording.\n' +
-                'Sample rate: Select the sample rate for your audio recordings.\n' +
-                'Start/Stop hotkey: Set a hotkey to quickly start and stop recordings.\n' +
-                'Pause hotkey: Set a hotkey to pause recordings.\n' +
-                'Resume hotkey: Set a hotkey to resume recordings.\n' +
-                'Bitrate: Adjust the bitrate for your recordings to control quality and file size.\n' +
-                'Visual indicators: The status bar will show when recording is active.'
+                'File Prefix: Customize the prefix for your audio files. The final filename includes this prefix and a timestamp.\n\n' +
+                'Recording Format: Choose between OGG, WEBM, MP3, or M4A for your audio recordings.\n\n' +
+                'Save Folder: Specify where recordings will be saved. Autocomplete suggestions are available.\n\n' +
+                'Audio Input Device: Select the microphone for recording.\n\n' +
+                'Sample Rate: Set the sample rate for your audio recordings.\n\n' +
+                'Hotkeys:\n' +
+                '- Start/Stop: Set a hotkey to quickly start and stop recordings.\n' +
+                '- Pause: Set a hotkey to pause recordings.\n' +
+                '- Resume: Set a hotkey to resume recordings.\n\n' +
+                'Bitrate: Adjust to control quality and file size of your recordings.\n\n' +
+                'Visual Indicators: The status bar displays when recording is active.\n\n' +
+                'Multi-track Recording:\n' +
+                '- Enable to record multiple audio sources simultaneously.\n' +
+                '- Maximum Tracks: Set the number of simultaneous tracks (1-8).\n' +
+                '- Output Mode: Choose between a single combined file or separate files for each track.\n' +
+                '- Use Source Names: Option to use audio source names for individual track filenames.\n' +
+                '- Audio Source Selection: Choose specific audio input devices for each track.'
             )
             .setHeading();
+    }
+
+    async populateAudioDevices(dropdown: DropdownComponent) {
+        const devices = await this.getAudioInputDevices();
+        devices.forEach(device => {
+            dropdown.addOption(device.deviceId, device.label || `Audio Device ${device.deviceId}`);
+        });
     }
 }
