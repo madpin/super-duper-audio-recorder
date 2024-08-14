@@ -1,7 +1,7 @@
 {
   "id": "super-duper-audio-recorder",
   "name": "Super Duper Audio Recorder",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "minAppVersion": "0.15.0",
   "description": "Records audio directly, with input device and folder configuration, similar to the core one, but better",
   "author": "Thiago MadPin",
