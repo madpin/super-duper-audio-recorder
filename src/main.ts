@@ -1,5 +1,7 @@
 import { App, Editor, MarkdownView, Modal, normalizePath, Notice, Plugin, Setting, TFile } from 'obsidian';
-import { AudioRecorderSettingTab, AudioRecorderSettings, DEFAULT_SETTINGS } from './settings-tab';
+import { AudioRecorderSettingTab } from './settings-tab';
+import { AudioRecorderSettings, DEFAULT_SETTINGS } from './settings';
+import { bufferToWave } from './wav-exporter';
 
 enum RecordingStatus {
 	Idle,
@@ -13,6 +15,11 @@ class AudioRecorderPlugin extends Plugin {
 	private audioChunks: Blob[][] = [];
 	private statusBarItem: HTMLElement | null = null;
 	private recordingStatus: RecordingStatus = RecordingStatus.Idle;
+	private autoSaveTimer: number | null = null;
+	private splitTimer: number | null = null;
+	private recordingStartTime: number = 0;
+	private currentRecordingSize: number[] = [];
+	private readonly MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB threshold for automatic split
 
 	async onload() {
 		await this.loadSettings();
@@ -23,6 +30,7 @@ class AudioRecorderPlugin extends Plugin {
 	}
 
 	onunload() {
+		this.stopTimers();
 		this.updateStatusBar();
 	}
 
@@ -57,9 +65,9 @@ class AudioRecorderPlugin extends Plugin {
 		this.updateStatusBar();
 	}
 
-	private debugLog(message: string) {
-		if (this.settings.debug) {
-			console.log(`[AudioRecorder Debug] ${message}`);
+	private log(message: string, isError: boolean = false) {
+		if (this.settings.debug || isError) {
+			console.log(`[AudioRecorder${isError ? ' ERROR' : ' Debug'}] ${message}`);
 		}
 	}
 
@@ -94,49 +102,104 @@ class AudioRecorderPlugin extends Plugin {
 	private async startRecording() {
 		try {
 			const mimeType = `audio/${this.settings.recordingFormat};codecs=opus`;
-			if (!MediaRecorder.isTypeSupported(mimeType)) {
-				throw new Error(`The format ${mimeType} is not supported in this browser.`);
+			const isWav = this.settings.recordingFormat === 'wav';
+
+			// If WAV, we might need a different mimeType for MediaRecorder if supported,
+			// or just use default and convert at the end.
+			// Actually, MediaRecorder usually doesn't support 'audio/wav' directly.
+			// We'll record as webm/ogg and convert to WAV if requested at the end.
+			const actualMimeType = isWav ? 'audio/webm;codecs=opus' : mimeType;
+
+			if (!isWav && !MediaRecorder.isTypeSupported(actualMimeType)) {
+				throw new Error(`The format ${actualMimeType} is not supported in this browser.`);
 			}
 
 			const streams = await this.getAudioStreams();
-			this.recorders = streams.map(stream => new MediaRecorder(stream, { mimeType }));
+			this.recorders = streams.map(stream => new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported(actualMimeType) ? actualMimeType : undefined }));
 			this.audioChunks = this.recorders.map(() => []);
+			this.currentRecordingSize = this.recorders.map(() => 0);
 
 			this.recorders.forEach((recorder, index) => {
 				recorder.ondataavailable = (event) => {
 					if (event.data.size > 0) {
 						this.audioChunks[index].push(event.data);
+						this.currentRecordingSize[index] += event.data.size;
+
+						// Automatic split if file gets too large
+						if (this.currentRecordingSize[index] > this.MAX_FILE_SIZE) {
+							this.log(`File size threshold reached (${this.currentRecordingSize[index]} bytes). Triggering automatic split.`);
+							this.splitRecording();
+						}
 					}
 				};
-				recorder.start();
+				recorder.start(10000); // Collect data every 10 seconds for better data safety
 			});
 
 			this.recordingStatus = RecordingStatus.Recording;
+			this.recordingStartTime = Date.now();
 			this.updateStatusBar();
+			this.startTimers();
 			new Notice('Recording started');
 		} catch (error) {
 			new Notice(`Error starting recording: ${error.message}`);
-			this.debug(`Error in startRecording: ${error}`);
+			this.log(`Error in startRecording: ${error}`, true);
 		}
 	}
 
-	private async stopRecording() {
+	private startTimers() {
+		this.stopTimers();
+		if (this.settings.autoSaveInterval > 0) {
+			this.autoSaveTimer = window.setInterval(() => this.autoSave(), this.settings.autoSaveInterval * 60 * 1000);
+		}
+		if (this.settings.splitFileDuration > 0) {
+			this.splitTimer = window.setInterval(() => this.splitRecording(), this.settings.splitFileDuration * 60 * 1000);
+		}
+	}
+
+	private stopTimers() {
+		if (this.autoSaveTimer) {
+			clearInterval(this.autoSaveTimer);
+			this.autoSaveTimer = null;
+		}
+		if (this.splitTimer) {
+			clearInterval(this.splitTimer);
+			this.splitTimer = null;
+		}
+	}
+
+	private async autoSave() {
+		this.log('Performing auto-save...');
+		await this.saveRecording(true);
+	}
+
+	private async splitRecording() {
+		this.log('Splitting recording...');
+		await this.stopRecording(false);
+		await this.startRecording();
+	}
+
+	private async stopRecording(showNotice: boolean = true) {
 		try {
+			this.stopTimers();
 			await Promise.all(this.recorders.map(recorder => {
 				return new Promise<void>((resolve) => {
-					recorder.addEventListener('stop', () => resolve(), { once: true });
-					recorder.stop();
+					if (recorder.state === 'inactive') {
+						resolve();
+					} else {
+						recorder.addEventListener('stop', () => resolve(), { once: true });
+						recorder.stop();
+					}
 				});
 			}));
 
 			this.recordingStatus = RecordingStatus.Idle;
 			this.updateStatusBar();
-			new Notice('Recording stopped');
+			if (showNotice) new Notice('Recording stopped');
 
 			await this.saveRecording();
 		} catch (error) {
 			new Notice(`Error stopping recording: ${error.message}`);
-			this.debug(`Error in stopRecording: ${error}`);
+			this.log(`Error in stopRecording: ${error}`, true);
 		}
 	}
 
@@ -156,7 +219,6 @@ class AudioRecorderPlugin extends Plugin {
 	}
 
 	private async getAudioStreams(): Promise<MediaStream[]> {
-		const devices = await this.getAudioInputDevices();
 		const streamPromises = this.settings.enableMultiTrack
 			? Object.values(this.settings.trackAudioSources).map((deviceId: string) => this.getAudioStream(deviceId))
 			: [this.getAudioStream(this.settings.audioDeviceId)];
@@ -177,38 +239,49 @@ class AudioRecorderPlugin extends Plugin {
 		return devices.filter(device => device.kind === 'audioinput');
 	}
 
-	private async saveRecording() {
+	private async saveRecording(isAutoSave: boolean = false) {
 		const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+		const suffix = isAutoSave ? '-autosave' : '';
 		const fileLinks: string[] = [];
 
-		if (this.settings.outputMode === 'single') {
-			const mergedAudio = await this.mergeAudioTracks();
-			const fileName = `${this.settings.filePrefix}-multitrack-${timestamp}.wav`;
-			const filePath = await this.saveAudioFile(mergedAudio, fileName);
-			if (filePath) fileLinks.push(filePath);
-		} else {
-			for (let i = 0; i < this.audioChunks.length; i++) {
-				const chunks = this.audioChunks[i];
-				if (chunks.length === 0) continue;
-
-				const audioBlob = new Blob(chunks, { type: `audio/${this.settings.recordingFormat}` });
-				const sourceName = await this.getAudioSourceName(this.settings.trackAudioSources[i+1]);
-				const fileName = `${this.settings.filePrefix}-${sourceName}-${timestamp}.${this.settings.recordingFormat}`;
-				const filePath = await this.saveAudioFile(audioBlob, fileName);
+		if (this.settings.outputMode === 'single' && !isAutoSave) {
+			try {
+				const mergedAudio = await this.mergeAudioTracks();
+				const fileName = `${this.settings.filePrefix}-combined-${timestamp}${suffix}.wav`;
+				const filePath = await this.saveAudioFile(mergedAudio, fileName);
 				if (filePath) fileLinks.push(filePath);
+			} catch (e) {
+				this.log(`Failed to merge tracks: ${e}`, true);
+				// Fallback to saving separate tracks if merge fails
+				await this.saveTracksSeparately(timestamp, suffix, fileLinks);
 			}
+		} else {
+			await this.saveTracksSeparately(timestamp, suffix, fileLinks);
 		}
 
-		if (fileLinks.length > 0) {
+		if (fileLinks.length > 0 && !isAutoSave) {
 			this.insertFileLinks(fileLinks);
 			new Notice(`Saved ${fileLinks.length} audio file(s)`);
-		} else {
+		} else if (fileLinks.length === 0 && !isAutoSave) {
 			new Notice('No audio data recorded');
 		}
 	}
 
+	private async saveTracksSeparately(timestamp: string, suffix: string, fileLinks: string[]) {
+		for (let i = 0; i < this.audioChunks.length; i++) {
+			const chunks = this.audioChunks[i];
+			if (chunks.length === 0) continue;
+
+			const audioBlob = new Blob(chunks, { type: `audio/${this.settings.recordingFormat}` });
+			const sourceName = await this.getAudioSourceName(this.settings.trackAudioSources[i + 1]);
+			const fileName = `${this.settings.filePrefix}-${sourceName}-${timestamp}${suffix}.${this.settings.recordingFormat}`;
+			const filePath = await this.saveAudioFile(audioBlob, fileName);
+			if (filePath) fileLinks.push(filePath);
+		}
+	}
+
 	private async mergeAudioTracks(): Promise<Blob> {
-		const audioContext = new (window.AudioContext || window.AudioContext)();
+		const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
 		const buffers = await Promise.all(this.audioChunks.map(async (chunks) => {
 			if (chunks.length === 0) return null;
 			const blob = new Blob(chunks, { type: `audio/${this.settings.recordingFormat}` });
@@ -222,7 +295,7 @@ class AudioRecorderPlugin extends Plugin {
 		}
 
 		const longestDuration = Math.max(...validBuffers.map(buffer => buffer.duration));
-		const offlineContext = new OfflineAudioContext(2, audioContext.sampleRate * longestDuration, audioContext.sampleRate);
+		const offlineContext = new OfflineAudioContext(2, Math.ceil(audioContext.sampleRate * longestDuration), audioContext.sampleRate);
 
 		validBuffers.forEach(buffer => {
 			const source = offlineContext.createBufferSource();
@@ -232,105 +305,51 @@ class AudioRecorderPlugin extends Plugin {
 		});
 
 		const renderedBuffer = await offlineContext.startRendering();
-		return this.bufferToWave(renderedBuffer, renderedBuffer.length);
-	}
-
-	private bufferToWave(abuffer: AudioBuffer, len: number) {
-
-		this.debugLog("abuffer:" + abuffer)
-		this.debugLog("len:" + len)
-		this.debugLog("abuffer.numberOfChannels:" + abuffer.numberOfChannels)
-
-
-		const numOfChan = abuffer.numberOfChannels;
-		const length = len * numOfChan * 2 + 44;
-		const buffer = new ArrayBuffer(length);
-		const view = new DataView(buffer);
-		const channels = [];
-		let i, sample;
-		let offset = 0;
-		this.debugLog(`Buffer length: ${abuffer.length}, Channels: ${numOfChan}, Sample rate: ${abuffer.sampleRate}`);
-
-		// write WAVE header
-		setUint32(0x46464952);
-		setUint32(length - 8);
-		setUint32(0x45564157);
-		setUint32(0x20746d66);
-		setUint32(16);
-		setUint16(1);
-		setUint16(numOfChan);
-		setUint32(abuffer.sampleRate);
-		setUint32(abuffer.sampleRate * 2 * numOfChan);
-		setUint16(numOfChan * 2);
-		setUint16(16);
-		setUint32(0x61746164);
-		setUint32(length - 44);
-
-		// write interleaved data
-		for (i = 0; i < abuffer.numberOfChannels; i++)
-			channels.push(abuffer.getChannelData(i));
-
-		for (offset = 0; offset < len && offset < abuffer.length; offset++) {
-			for (i = 0; i < numOfChan; i++) {
-				sample = Math.max(-1, Math.min(1, channels[i][offset]));
-				view.setInt16(44 + offset * numOfChan * 2 + i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-			}
-		}
-
-
-
-
-
-		return new Blob([buffer], { type: "audio/wav" });
-
-		function setUint16(data: number) {
-			view.setUint16(offset, data, true);
-			offset += 2;
-		}
-
-		function setUint32(data: number) {
-			view.setUint32(offset, data, true);
-			offset += 4;
-		}
+		return bufferToWave(renderedBuffer, renderedBuffer.length);
 	}
 
 	private async saveAudioFile(audioBlob: Blob, fileName: string): Promise<string | null> {
 		if (audioBlob.size === 0) {
-			this.debug(`Skipping empty file: ${fileName}`);
+			this.log(`Skipping empty file: ${fileName}`);
 			return null;
 		}
 
-		const arrayBuffer = await audioBlob.arrayBuffer();
-		const base64Audio = Buffer.from(arrayBuffer).toString('base64');
-		let sanitizedFileName = fileName.replace(/[\\\\/:*?"<>|]/g, '-');
-		let filePath = normalizePath(this.settings.saveFolder + '/' + sanitizedFileName);
+		try {
+			const arrayBuffer = await audioBlob.arrayBuffer();
+			let sanitizedFileName = fileName.replace(/[\\\\/:*?"<>|]/g, '-');
+			let filePath = normalizePath(this.settings.saveFolder + '/' + sanitizedFileName);
 
-		let counter = 1;
-		while (await this.app.vault.adapter.exists(filePath)) {
-			const parts = sanitizedFileName.split('.');
-			const ext = parts.pop();
-			const name = parts.join('.');
-			sanitizedFileName = `${name}_${counter}.${ext}`;
-			filePath = normalizePath(this.settings.saveFolder + '/' + sanitizedFileName);
-			counter++;
+			let counter = 1;
+			while (await this.app.vault.adapter.exists(filePath)) {
+				const parts = sanitizedFileName.split('.');
+				const ext = parts.pop();
+				const name = parts.join('.');
+				sanitizedFileName = `${name}_${counter}.${ext}`;
+				filePath = normalizePath(this.settings.saveFolder + '/' + sanitizedFileName);
+				counter++;
+			}
+
+			await this.app.vault.createBinary(filePath, arrayBuffer);
+			return filePath;
+		} catch (error) {
+			this.log(`Error saving audio file ${fileName}: ${error}`, true);
+			new Notice(`Error saving recording: ${error.message}`);
+			return null;
 		}
-
-		await this.app.vault.createBinary(filePath, Buffer.from(base64Audio, 'base64'));
-		return filePath;
 	}
 
 	private insertFileLinks(fileLinks: string[]) {
 		const editor = this.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
 		if (editor) {
 			const links = fileLinks.map(path => `![[${path}]]`).join('\n');
-			editor.replaceSelection(links);
+			editor.replaceSelection(links + '\n');
 		}
 	}
 
 	private async getAudioSourceName(deviceId: string): Promise<string> {
 		const devices = await this.getAudioInputDevices();
 		const device = devices.find(d => d.deviceId === deviceId);
-		return device ? device.label.replace(/[^a-zA-Z0-9]/g, '') || `Device${deviceId}` : 'UnknownDevice';
+		return device ? device.label.replace(/[^a-zA-Z0-9]/g, '') || `Device${deviceId}` : 'DefaultDevice';
 	}
 
 	private async showDeviceSelectionModal() {
@@ -340,12 +359,6 @@ class AudioRecorderPlugin extends Plugin {
 			return;
 		}
 		new SelectInputDeviceModal(this.app, this, devices).open();
-	}
-
-	private debug(message: string) {
-		if (this.settings.debug) {
-			console.log(`[AudioRecorder Debug] ${message}`);
-		}
 	}
 }
 
@@ -363,6 +376,9 @@ class SelectInputDeviceModal extends Modal {
 			const option = dropdown.createEl('option');
 			option.value = device.deviceId;
 			option.text = device.label || `Device ${device.deviceId}`;
+			if (device.deviceId === this.plugin.settings.audioDeviceId) {
+				option.selected = true;
+			}
 		});
 
 		const button = contentEl.createEl('button', { text: 'Select' });
